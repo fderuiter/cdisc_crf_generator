@@ -53,7 +53,6 @@ DOMAIN_INFO: Dict[str, Tuple[str, str]] = {
     "ML": ("Interventions", "Meal Data"),
     "PR": ("Interventions", "Procedures"),
     "SU": ("Interventions", "Substance Use"),
-
     # Events
     "AE": ("Events", "Adverse Events"),
     "CE": ("Events", "Clinical Events"),
@@ -62,7 +61,6 @@ DOMAIN_INFO: Dict[str, Tuple[str, str]] = {
     "HO": ("Events", "Healthcare Encounters"),
     "MH": ("Events", "Medical History"),
     "SA": ("Events", "Serious Adverse Events"),
-
     # Findings
     "CP": ("Findings", "Cell Phenotype Findings"),
     "CV": ("Findings", "Cardiovascular System Findings"),
@@ -88,15 +86,14 @@ DOMAIN_INFO: Dict[str, Tuple[str, str]] = {
     "TU": ("Findings", "Tumor / Lesion Identification"),
     "UR": ("Findings", "Urinary System Findings"),
     "VS": ("Findings", "Vital Signs"),
-
     # Findings‑About
     "FA": ("Findings About", "Findings About Events or Interventions"),
     "SR": ("Findings About", "Skin Response"),
-
     # Special Purpose
     "CO": ("Special Purpose", "Comments"),
     "DM": ("Special Purpose", "Demographics"),
 }
+
 
 def get_domain_info(domain: str) -> Tuple[str, str]:
     """Return (category, full title) for *domain* code."""
@@ -105,9 +102,11 @@ def get_domain_info(domain: str) -> Tuple[str, str]:
     except KeyError:
         return ("Unknown", domain)
 
+
 ###############################################################################
 # Low‑level helpers
 ###############################################################################
+
 
 def _add_page_field(paragraph):
     """Insert Word PAGE field into *paragraph* (in‑place)."""
@@ -134,10 +133,63 @@ def _set_cell_shading(cell, color_hex: str = "4F81BD"):
     for shd in tc_pr.findall("w:shd", tc_pr.nsmap):
         tc_pr.remove(shd)
     # Add new shading element
-    shd_elm = parse_xml(
-        f'<w:shd {nsdecls("w")} w:fill="{color_hex}" w:val="clear"/>'
-    )
+    shd_elm = parse_xml(f'<w:shd {nsdecls("w")} w:fill="{color_hex}" w:val="clear"/>')
     tc_pr.append(shd_elm)
+
+
+def _add_bottom_border(cell) -> None:
+    """Add a thin bottom border to *cell*."""
+    tc_pr = cell._tc.get_or_add_tcPr()
+    borders = tc_pr.find(qn("w:tcBorders"))
+    if borders is None:
+        borders = OxmlElement("w:tcBorders")
+        tc_pr.append(borders)
+    bottom = borders.find(qn("w:bottom"))
+    if bottom is None:
+        bottom = OxmlElement("w:bottom")
+        borders.append(bottom)
+    bottom.set(qn("w:val"), "single")
+    bottom.set(qn("w:sz"), "4")
+    bottom.set(qn("w:color"), "auto")
+
+
+def _add_checkbox(paragraph) -> None:
+    """Insert a checkbox content control into *paragraph*."""
+    sdt = OxmlElement("w:sdt")
+    pr = OxmlElement("w:sdtPr")
+    cb = OxmlElement("w14:checkbox")
+    pr.append(cb)
+    content = OxmlElement("w:sdtContent")
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = " "
+    r.append(t)
+    content.append(r)
+    sdt.append(pr)
+    sdt.append(content)
+    paragraph._p.append(sdt)
+
+
+def _add_date_picker(paragraph) -> None:
+    """Insert a date picker content control into *paragraph*."""
+    sdt = OxmlElement("w:sdt")
+    pr = OxmlElement("w:sdtPr")
+    dt = OxmlElement("w14:date")
+    pr.append(dt)
+    content = OxmlElement("w:sdtContent")
+    r = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = ""
+    r.append(t)
+    content.append(r)
+    sdt.append(pr)
+    sdt.append(content)
+    paragraph._p.append(sdt)
+
+
+def _add_underline_entry(paragraph, length: int) -> None:
+    run = paragraph.add_run(" " * length)
+    run.font.underline = True
 
 
 def _style_header_cell(cell):
@@ -147,9 +199,11 @@ def _style_header_cell(cell):
     run.bold = True
     run.font.color.rgb = RGBColor(0xFF, 0xFF, 0xFF)
 
+
 ###############################################################################
 # Data I/O helpers
 ###############################################################################
+
 
 def load_ig(ig_path: str) -> pd.DataFrame:
     """Load and normalise the *Variables* worksheet from a CDASH IG workbook."""
@@ -173,11 +227,15 @@ def load_ig(ig_path: str) -> pd.DataFrame:
 
     return ig_df
 
+
 ###############################################################################
 # Core CRF builder
 ###############################################################################
 
-def build_domain_crf(domain_df: pd.DataFrame, domain: str, out_dir: pathlib.Path) -> None:
+
+def build_domain_crf(
+    domain_df: pd.DataFrame, domain: str, out_dir: pathlib.Path
+) -> None:
     """Build a Word document for a single CDASH *domain* and save it to disk."""
 
     category, full_title = get_domain_info(domain)
@@ -246,35 +304,15 @@ def build_domain_crf(domain_df: pd.DataFrame, domain: str, out_dir: pathlib.Path
     f_right.runs[0].font.color.rgb = RGBColor(0x80, 0x80, 0x80)
 
     # ---------------------------------------------------------------------
-    #  SECTION A – ADMINISTRATIVE (static content)
-    # ---------------------------------------------------------------------
-    document.add_paragraph()
-    secA_tbl = document.add_table(rows=3, cols=2, style="Table Grid")
-    secA_tbl.autofit = False
-    secA_tbl.allow_autofit = False
-
-    # Header row (spanning two columns)
-    hdr_row = secA_tbl.rows[0]
-    hdr_cell = hdr_row.cells[0]
-    hdr_cell.merge(hdr_row.cells[1])
-    hdr_cell.text = "SECTION A    ADMINISTRATIVE"
-    _set_cell_shading(hdr_cell, "8064A2")  # muted purple
-    _style_header_cell(hdr_cell)
-
-    # Row 1 – Question completed?
-    secA_tbl.rows[1].cells[0].text = f"Was {full_title.lower()} completed?"
-    secA_tbl.rows[1].cells[1].text = "○ No (Complete protocol deviation form)    ○ Yes"
-
-    # Row 2 – Date of assessment
-    secA_tbl.rows[2].cells[0].text = "Date of assessment:"
-    secA_tbl.rows[2].cells[1].text = "__|__|____|____|    DD‑MMM‑YYYY"
-
-    # ---------------------------------------------------------------------
     #  SECTION B – DOMAIN VARIABLES
     # ---------------------------------------------------------------------
     document.add_paragraph()
-    var_tbl = document.add_table(rows=1, cols=6, style="Table Grid")
+    var_tbl = document.add_table(rows=1, cols=7, style="Table Grid")
     var_tbl.autofit = False
+    total_width = section.page_width - section.left_margin - section.right_margin
+    col_width = int(total_width / 7)
+    for col in var_tbl.columns:
+        col.width = col_width
 
     hdr_cells = var_tbl.rows[0].cells
     col_titles = [
@@ -284,14 +322,18 @@ def build_domain_crf(domain_df: pd.DataFrame, domain: str, out_dir: pathlib.Path
         "Controlled Terminology",
         "Data Entry",
         "Instructions",
+        "Required",
     ]
     for idx, title in enumerate(col_titles):
         hdr_cells[idx].text = title
         _set_cell_shading(hdr_cells[idx], "4F81BD")
         _style_header_cell(hdr_cells[idx])
 
+    ct_legend: dict[str, int] = {}
+    footnotes: dict[str, int] = {}
+
     # Data rows ordered by the "Variable Order" column
-    for _, row in domain_df.sort_values("Order").iterrows():
+    for idx, (_, row) in enumerate(domain_df.sort_values("Order").iterrows(), start=1):
         cells = var_tbl.add_row().cells
         # 0 Variable name
         cells[0].text = row["Variable"]
@@ -305,55 +347,145 @@ def build_domain_crf(domain_df: pd.DataFrame, domain: str, out_dir: pathlib.Path
         # 3 Controlled terminology – prefer values over codes
         ct_val = row.get("CT Values")
         ct_code = row.get("CT Codes")
-        cells[3].text = (
+        ct = (
             str(ct_val)
             if pd.notna(ct_val)
             else str(ct_code) if pd.notna(ct_code) else ""
         )
+        if len(ct) > 40:
+            idx_ct = ct_legend.setdefault(ct, len(ct_legend) + 1)
+            cells[3].text = f"\u2020{idx_ct}"
+        else:
+            cells[3].text = ct
 
-        # 4 Data entry placeholder (simple underline for now)
-        cells[4].text = "_______________"
+        # 4 Data entry placeholder (smart entry controls)
+        entry_para = cells[4].paragraphs[0]
+        label_lower = str(row.get("Display Label", "")).lower()
+        var_upper = row["Variable"].upper()
+        if "date" in label_lower or var_upper.endswith(("DT", "DAT")):
+            _add_date_picker(entry_para)
+        elif ct and len(str(ct).split(";")) <= 4:
+            for i, val in enumerate(str(ct).split(";")):
+                if i:
+                    entry_para.add_run(" ")
+                _add_checkbox(entry_para)
+                entry_para.add_run(val.strip())
+        else:
+            expected = max(len(str(ct)), 10)
+            _add_underline_entry(entry_para, expected)
 
         # 5 Instructions (italic, stacked if multiple)
         instructions = []
         if pd.notna(row.get("CRF Instructions")):
             instructions.append(str(row.get("CRF Instructions")))
-        if pd.notna(row.get("Implementation Notes")):
-            instructions.append(str(row.get("Implementation Notes")))
+        impl_note = row.get("Implementation Notes")
+        if pd.notna(impl_note):
+            impl_note = str(impl_note)
+            if len(impl_note) > 60:
+                fn_idx = footnotes.setdefault(impl_note, len(footnotes) + 1)
+                instructions.append(f"[{fn_idx}]")
+            else:
+                instructions.append(impl_note)
+
+            if any(t in impl_note.lower() for t in ["if ", "derive", "origin"]):
+                instructions.append("Validate dependencies across domains")
 
         # Auto‑detect date fields and add a formatting hint
-        label_lower = str(row.get("Display Label", "")).lower()
-        var_upper = row["Variable"].upper()
         if "date" in label_lower or var_upper.endswith(("DT", "DAT")):
             instructions.append("Format: dd/mm/yyyy")
 
         instr_para = cells[5].paragraphs[0]
-        for idx, item in enumerate(instructions):
+        for i_ins, item in enumerate(instructions):
             run = instr_para.add_run(item)
             run.italic = True
-            if idx < len(instructions) - 1:
+            if i_ins < len(instructions) - 1:
                 instr_para.add_run("\n")
+
+        req_cell = cells[6]
+        req_text = row.get("CRF Instructions")
+        if isinstance(req_text, str) and any(
+            k in req_text.lower() for k in ["required", "mandatory"]
+        ):
+            req_cell.text = "Yes"
+        else:
+            req_cell.text = ""
+
+        if idx % 3 == 0:
+            for c in cells:
+                _add_bottom_border(c)
+
+    if footnotes:
+        document.add_heading("Footnotes", level=2)
+        for text, num in footnotes.items():
+            p = document.add_paragraph()
+            p.add_run(f"[{num}] ").bold = True
+            p.add_run(text)
+
+    if ct_legend:
+        document.add_page_break()
+        document.add_heading("Controlled Terminology legend", level=2)
+        legend = document.add_table(rows=len(ct_legend) + 1, cols=2, style="Table Grid")
+        legend.cell(0, 0).text = "Symbol"
+        legend.cell(0, 1).text = "Controlled Terminology"
+        for ct_text, idx_ct in ct_legend.items():
+            row_ct = legend.add_row().cells
+            row_ct[0].text = f"\u2020{idx_ct}"
+            row_ct[1].text = ct_text
+
+    # ---------------------------------------------------------------------
+    #  SECTION A – ADMINISTRATIVE (static content)
+    # ---------------------------------------------------------------------
+    document.add_paragraph()
+    secA_tbl = document.add_table(rows=3, cols=2, style="Table Grid")
+    secA_tbl.autofit = False
+    secA_tbl.allow_autofit = False
+
+    hdr_row = secA_tbl.rows[0]
+    hdr_cell = hdr_row.cells[0]
+    hdr_cell.merge(hdr_row.cells[1])
+    hdr_cell.text = "SECTION\u00a0A\u00a0\u00a0ADMINISTRATIVE"
+    _set_cell_shading(hdr_cell, "8064A2")
+    _style_header_cell(hdr_cell)
+
+    secA_tbl.rows[1].cells[0].text = f"Was {full_title.lower()} completed?"
+    secA_tbl.rows[1].cells[
+        1
+    ].text = "○\u00a0No (Complete protocol deviation form)    ○\u00a0Yes"
+
+    secA_tbl.rows[2].cells[0].text = "Date of assessment:"
+    secA_tbl.rows[2].cells[1].text = "__|__|____|____|    DD‑MMM‑YYYY"
 
     # ---------------------------------------------------------------------
     #  Save document
     # ---------------------------------------------------------------------
-    out_path = out_dir / f"{domain}_{full_title.replace(' ', '_')}_CRF.docx"
+    out_path = out_dir / f"{domain}_CRF.docx"
     document.save(out_path)
     print(f"\u2713 Saved {out_path.relative_to(out_dir.parent)}")
+
 
 ###############################################################################
 # CLI entry‑point
 ###############################################################################
 
+
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Generate Word CRF shells from CDASH metadata workbooks."
+        description="Generate Word CRFs from CDASH metadata workbooks."
     )
-    parser.add_argument("--model", required=True, help="Path to CDASH_Model_v1.3.xlsx (reserved for future use)")
-    parser.add_argument("--ig", required=True, help="Path to CDASHIG_v2.3.xlsx")
-    parser.add_argument("--out", default="crfs", help="Directory for generated Word documents")
     parser.add_argument(
-        "--domains", nargs="*", metavar="DOMAIN", help="Optional domain whitelist (e.g. AE CM VS)"
+        "--model",
+        required=True,
+        help="Path to CDASH_Model_v1.3.xlsx (reserved for future use)",
+    )
+    parser.add_argument("--ig", required=True, help="Path to CDASHIG_v2.3.xlsx")
+    parser.add_argument(
+        "--out", default="crfs", help="Directory for generated Word documents"
+    )
+    parser.add_argument(
+        "--domains",
+        nargs="*",
+        metavar="DOMAIN",
+        help="Optional domain whitelist (e.g. AE CM VS)",
     )
 
     args = parser.parse_args()
@@ -366,7 +498,7 @@ def main() -> None:
     for dom in target_domains:
         dom_df = ig_df[ig_df["Domain"] == dom]
         if dom_df.empty:
-            print(f"\u26A0 Domain {dom} not found in IG – skipped")
+            print(f"\u26a0 Domain {dom} not found in IG – skipped")
             continue
         build_domain_crf(dom_df, dom, out_dir)
 
